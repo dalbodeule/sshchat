@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io"
+	"fmt"
 	"log"
 	"os"
 
@@ -10,6 +10,28 @@ import (
 	"github.com/gliderlabs/ssh"
 	"github.com/joho/godotenv"
 )
+
+func sessionHandler(s ssh.Session) {
+	ptyReq, _, isPty := s.Pty()
+	if !isPty {
+		_, _ = fmt.Fprintln(s, "Err: PTY requires. Reconnect with -t option.")
+		_ = s.Exit(1)
+		return
+	}
+
+	remote := s.RemoteAddr().String()
+	username := s.User()
+
+	log.Printf("[sshchat] %s connected. %s", username, remote)
+	client := utils.NewClient(s, ptyReq.Window.Height, ptyReq.Window.Width, username, remote)
+
+	defer func() {
+		client.Close()
+		log.Printf("[sshchat] %s disconnected. %s", username, remote)
+	}()
+
+	client.EventLoop()
+}
 
 func main() {
 	err := godotenv.Load()
@@ -31,10 +53,6 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	}
-
-	sessionHandler := func(s ssh.Session) {
-		_, _ = io.WriteString(s, "Hello World\n")
 	}
 
 	s := &ssh.Server{
