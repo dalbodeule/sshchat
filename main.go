@@ -3,15 +3,18 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
+	"slices"
+	"strings"
 
 	"sshchat/utils"
 
 	"github.com/gliderlabs/ssh"
-	"github.com/joho/godotenv"
+	"github.com/oschwald/geoip2-golang"
 )
 
-func sessionHandler(s ssh.Session) {
+var config = utils.GetConfig()
+
+func sessionHandler(s ssh.Session, geoip *geoip2.Reader) {
 	ptyReq, _, isPty := s.Pty()
 	if !isPty {
 		_, _ = fmt.Fprintln(s, "Err: PTY requires. Reconnect with -t option.")
@@ -22,24 +25,46 @@ func sessionHandler(s ssh.Session) {
 	remote := s.RemoteAddr().String()
 	username := s.User()
 
-	log.Printf("[sshchat] %s connected. %s", username, remote)
+	geoStatus := utils.GetIPInfo(remote, geoip)
+	if geoStatus == nil {
+		log.Printf("[sshchat] %s connected. %s / UNK [FORCE DISCONNECT]", username, remote)
+		_, _ = fmt.Fprintf(s, "[system] Your access country is blacklisted. UNK")
+		_ = s.Close()
+		return
+	} else {
+		log.Printf("[sshchat] %s connected. %s / %s", username, remote, geoStatus.Country)
+	}
+
+	if slices.Contains(config.CountryBlacklist, geoStatus.Country) {
+		log.Printf("[sshchat] %s country blacklisted. %s", username, remote)
+		_, _ = fmt.Fprintf(s, "[system] Your access country is blacklisted. %s\n", geoStatus.Country)
+		_ = s.Close()
+	}
+
+	if geoStatus.Country == "ZZ" && !(strings.HasPrefix(remote, "127") || strings.HasPrefix(remote, "[::1]")) {
+		log.Printf("[sshchat] unknown country blacklisted. %s", username)
+		_, _ = fmt.Fprintf(s, "[system] Unknown country is blacklisted. %s\n", geoStatus.Country)
+		_ = s.Close()
+	} else {
+		log.Printf("[sshchat] %s is localhost whitelisted.", username)
+	}
+
 	client := utils.NewClient(s, ptyReq.Window.Height, ptyReq.Window.Width, username, remote)
 
 	defer func() {
 		client.Close()
-		log.Printf("[sshchat] %s disconnected. %s", username, remote)
+		log.Printf("[sshchat] %s disconnected. %s / %s", username, remote, geoStatus.Country)
 	}()
 
 	client.EventLoop()
 }
 
 func main() {
-	err := godotenv.Load()
+	geoip, err := utils.GetDB(config.Geoip)
+	port := config.Port
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatalf("Geoip db is error: %v", err)
 	}
-
-	port := os.Getenv("PORT")
 
 	keys, err := utils.CheckHostKey()
 	if err != nil {
@@ -56,8 +81,10 @@ func main() {
 	}
 
 	s := &ssh.Server{
-		Addr:    ":" + port,
-		Handler: sessionHandler,
+		Addr: ":" + port,
+		Handler: func(s ssh.Session) {
+			sessionHandler(s, geoip)
+		},
 	}
 	for _, key := range keys {
 		s.AddHostKey(key)
