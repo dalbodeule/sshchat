@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"log"
 	"os"
 	"strings"
 
@@ -13,23 +12,23 @@ type Config struct {
 	Geoip            string
 	CountryBlacklist []string
 	PgDsn            string
+	RootPath         string
 }
 
 func GetConfig() *Config {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
+	_ = godotenv.Load()
 
 	port := os.Getenv("PORT")
 	geoipDbfile := os.Getenv("GEOIP_DB")
 	countryBlacklist := os.Getenv("COUNTRY_BLACKLIST")
 	pgDsn := os.Getenv("DB_DSN")
+	rootPath := os.Getenv("ROOT_PATH")
 
 	return &Config{
 		Port:             port,
 		Geoip:            geoipDbfile,
 		CountryBlacklist: strings.Split(countryBlacklist, ","),
 		PgDsn:            pgDsn,
+		RootPath:         rootPath,
 	}
 }

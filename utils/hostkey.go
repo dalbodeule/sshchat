@@ -15,8 +15,8 @@ import (
 
 // GenerateHostKey는 'keys' 디렉토리를 생성하고, RSA, ECDSA, Ed25519 호스트 개인 키를 생성하여 저장합니다.
 // 개인 키는 OpenSSH 형식으로 암호화되어 저장됩니다.
-func GenerateHostKey() error {
-	const keyDir = "./keys"
+func GenerateHostKey(rootPath string) error {
+	keyDir := rootPath + "/keys"
 
 	// 1. 키 디렉토리 생성
 	if err := os.MkdirAll(keyDir, 0700); err != nil {
@@ -103,25 +103,27 @@ func generateAndSaveKey(path string, keyType string) error {
 	return nil
 }
 
-func CheckHostKey() ([]ssh.Signer, error) {
-	keyFiles := []string{"./keys/id_rsa", "./keys/id_ecdsa", "./keys/id_ed25519"}
+func CheckHostKey(rootPath string) ([]ssh.Signer, error) {
+	keyFiles := []string{"keys/id_rsa", "keys/id_ecdsa", "keys/id_ed25519"}
 
 	for _, keyFile := range keyFiles {
-		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			return nil, fmt.Errorf("key file %s does not exist", keyFile)
+		tmp := rootPath + "/" + keyFile
+		if _, err := os.Stat(tmp); os.IsNotExist(err) {
+			return nil, fmt.Errorf("key file %s does not exist", tmp)
 		}
 	}
 
 	var keys = make([]ssh.Signer, 0)
 	for _, keyFile := range keyFiles {
-		keyBytes, err := os.ReadFile(keyFile)
+		tmp := rootPath + "/" + keyFile
+		keyBytes, err := os.ReadFile(tmp)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read key file %s: %v", keyFile, err)
+			return nil, fmt.Errorf("failed to read key file %s: %v", tmp, err)
 		}
 
 		signer, err := ssh.ParsePrivateKey(keyBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse private key %s: %v", keyFile, err)
+			return nil, fmt.Errorf("failed to parse private key %s: %v", tmp, err)
 		}
 
 		keys = append(keys, signer)

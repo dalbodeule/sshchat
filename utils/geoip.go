@@ -30,10 +30,7 @@ func GetIPInfo(ip string, db *geoip2.Reader) *IpInfo {
 	country := func(ip net.IP) string {
 		country, _ := db.Country(parsedIp)
 
-		println(country.Country.IsoCode)
-
 		if country != nil && country.Country.IsoCode != "" {
-			println(country.Country.IsoCode)
 			return country.Country.IsoCode
 		} else {
 			return "ZZ"

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"slices"
 	"strings"
 
@@ -24,7 +25,12 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
 		return
 	}
 
-	remote := s.RemoteAddr().String()
+	addr := s.RemoteAddr().String()
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	remote := strings.Trim(host, "[]")
 	username := s.User()
 
 	geoStatus := utils.GetIPInfo(remote, geoip)
@@ -43,12 +49,14 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
 		_ = s.Close()
 	}
 
-	if geoStatus.Country == "ZZ" && !(strings.HasPrefix(remote, "127") || strings.HasPrefix(remote, "[::1]")) {
-		log.Printf("[sshchat] unknown country blacklisted. %s", username)
-		_, _ = fmt.Fprintf(s, "[system] Unknown country is blacklisted. %s\n", geoStatus.Country)
-		_ = s.Close()
-	} else {
-		log.Printf("[sshchat] %s is localhost whitelisted.", username)
+	if geoStatus.Country == "ZZ" {
+		if strings.HasPrefix(remote, "127") || strings.HasPrefix(remote, "::1") {
+			log.Printf("[sshchat] %s is localhost whitelisted.", username)
+		} else {
+			log.Printf("[sshchat] unknown country blacklisted. %s", username)
+			_, _ = fmt.Fprintf(s, "[system] Unknown country is blacklisted. %s\n", geoStatus.Country)
+			_ = s.Close()
+		}
 	}
 
 	client := utils.NewClient(s, ptyReq.Window.Height, ptyReq.Window.Width, username, remote)
@@ -62,7 +70,7 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
 }
 
 func main() {
-	geoip, err := utils.GetDB(config.Geoip)
+	geoip, err := utils.GetDB(config.RootPath + "/" + config.Geoip)
 	if err != nil {
 		log.Fatalf("Geoip db is error: %v", err)
 	}
@@ -74,15 +82,15 @@ func main() {
 
 	port := config.Port
 
-	keys, err := utils.CheckHostKey()
+	keys, err := utils.CheckHostKey(config.RootPath)
 	if err != nil {
 		log.Print("Failed to check SSH keys: generate one.\n", err)
-		err = utils.GenerateHostKey()
+		err = utils.GenerateHostKey(config.RootPath)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		keys, err = utils.CheckHostKey()
+		keys, err = utils.CheckHostKey(config.RootPath)
 		if err != nil {
 			log.Fatal(err)
 		}
