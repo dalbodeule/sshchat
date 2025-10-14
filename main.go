@@ -6,15 +6,17 @@ import (
 	"slices"
 	"strings"
 
+	"sshchat/db"
 	"sshchat/utils"
 
 	"github.com/gliderlabs/ssh"
 	"github.com/oschwald/geoip2-golang"
+	"github.com/uptrace/bun"
 )
 
 var config = utils.GetConfig()
 
-func sessionHandler(s ssh.Session, geoip *geoip2.Reader) {
+func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
 	ptyReq, _, isPty := s.Pty()
 	if !isPty {
 		_, _ = fmt.Fprintln(s, "Err: PTY requires. Reconnect with -t option.")
@@ -61,10 +63,16 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader) {
 
 func main() {
 	geoip, err := utils.GetDB(config.Geoip)
-	port := config.Port
 	if err != nil {
 		log.Fatalf("Geoip db is error: %v", err)
 	}
+
+	pgDb, err := db.GetDB(config.PgDsn)
+	if err != nil {
+		log.Fatalf("DB Connection error: %v", err)
+	}
+
+	port := config.Port
 
 	keys, err := utils.CheckHostKey()
 	if err != nil {
@@ -83,12 +91,16 @@ func main() {
 	s := &ssh.Server{
 		Addr: ":" + port,
 		Handler: func(s ssh.Session) {
-			sessionHandler(s, geoip)
+			sessionHandler(s, geoip, pgDb)
 		},
 	}
 	for _, key := range keys {
 		s.AddHostKey(key)
 	}
+
+	defer func() {
+		_ = pgDb.Close()
+	}()
 
 	log.Print("Listening on :" + port)
 	log.Fatal(s.ListenAndServe())

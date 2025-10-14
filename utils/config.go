@@ -12,6 +12,7 @@ type Config struct {
 	Port             string
 	Geoip            string
 	CountryBlacklist []string
+	PgDsn            string
 }
 
 func GetConfig() *Config {
@@ -21,12 +22,14 @@ func GetConfig() *Config {
 	}
 
 	port := os.Getenv("PORT")
-	geoip_dbfile := os.Getenv("GEOIP_DB")
-	country_blacklist := os.Getenv("COUNTRY_BLACKLIST")
+	geoipDbfile := os.Getenv("GEOIP_DB")
+	countryBlacklist := os.Getenv("COUNTRY_BLACKLIST")
+	pgDsn := os.Getenv("DB_DSN")
 
 	return &Config{
 		Port:             port,
-		Geoip:            geoip_dbfile,
-		CountryBlacklist: strings.Split(country_blacklist, ","),
+		Geoip:            geoipDbfile,
+		CountryBlacklist: strings.Split(countryBlacklist, ","),
+		PgDsn:            pgDsn,
 	}
 }
