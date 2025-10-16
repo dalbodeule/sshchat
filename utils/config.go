@@ -13,6 +13,7 @@ type Config struct {
 	CountryBlacklist []string
 	PgDsn            string
 	RootPath         string
+	LokiHost         string
 }
 
 func GetConfig() *Config {
@@ -23,6 +24,7 @@ func GetConfig() *Config {
 	countryBlacklist := os.Getenv("COUNTRY_BLACKLIST")
 	pgDsn := os.Getenv("DB_DSN")
 	rootPath := os.Getenv("ROOT_PATH")
+	lokiHost := os.Getenv("LOKI_HOST")
 
 	return &Config{
 		Port:             port,
@@ -30,5 +32,6 @@ func GetConfig() *Config {
 		CountryBlacklist: strings.Split(countryBlacklist, ","),
 		PgDsn:            pgDsn,
 		RootPath:         rootPath,
+		LokiHost:         lokiHost,
 	}
 }

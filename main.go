@@ -3,9 +3,15 @@ package main
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
+	"os"
 	"slices"
 	"strings"
+
+	"github.com/grafana/loki-client-go/loki"
+	slogloki "github.com/samber/slog-loki/v3"
+	slogmulti "github.com/samber/slog-multi"
 
 	"sshchat/db"
 	"sshchat/utils"
@@ -17,7 +23,7 @@ import (
 
 var config = utils.GetConfig()
 
-func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
+func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB, logger *slog.Logger) {
 	ptyReq, _, isPty := s.Pty()
 	if !isPty {
 		_, _ = fmt.Fprintln(s, "Err: PTY requires. Reconnect with -t option.")
@@ -35,25 +41,25 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
 
 	geoStatus := utils.GetIPInfo(remote, geoip)
 	if geoStatus == nil {
-		log.Printf("[sshchat] %s connected. %s / UNK [FORCE DISCONNECT]", username, remote)
+		logger.Info("[sshchat] connected", "user", username, "remote", remote, "country", "UNK", "status", "FORCE DISCONNECT")
 		_, _ = fmt.Fprintf(s, "[system] Your access country is blacklisted. UNK")
 		_ = s.Close()
 		return
 	} else {
-		log.Printf("[sshchat] %s connected. %s / %s", username, remote, geoStatus.Country)
+		logger.Info("[sshchat] connected", "user", username, "remote", remote, "country", geoStatus.Country)
 	}
 
 	if slices.Contains(config.CountryBlacklist, geoStatus.Country) {
-		log.Printf("[sshchat] %s country blacklisted. %s", username, remote)
+		logger.Info("[sshchat] country blacklisted", "user", username, "remote", remote)
 		_, _ = fmt.Fprintf(s, "[system] Your access country is blacklisted. %s\n", geoStatus.Country)
 		_ = s.Close()
 	}
 
 	if geoStatus.Country == "ZZ" {
 		if strings.HasPrefix(remote, "127") || strings.HasPrefix(remote, "::1") {
-			log.Printf("[sshchat] %s is localhost whitelisted.", username)
+			logger.Info("[sshchat] localhost whitelisted", "user", username)
 		} else {
-			log.Printf("[sshchat] unknown country blacklisted. %s", username)
+			logger.Info("[sshchat] unknown country blacklisted", "user", username)
 			_, _ = fmt.Fprintf(s, "[system] Unknown country is blacklisted. %s\n", geoStatus.Country)
 			_ = s.Close()
 		}
@@ -63,16 +69,52 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB) {
 
 	defer func() {
 		client.Close()
-		log.Printf("[sshchat] %s disconnected. %s / %s", username, remote, geoStatus.Country)
+		logger.Info("[sshchat] disconnected", "user", username, "remote", remote, "country", geoStatus.Country)
 	}()
 
 	client.EventLoop()
 }
 
+func getLogger(lokiHost string) (*slog.Logger, error) {
+	if lokiHost == "" {
+		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		logger.Info("Loki host is not set. Logging to stdout")
+
+		return logger, nil
+	}
+
+	config, _ := loki.NewDefaultConfig(lokiHost)
+	config.TenantID = "sshchat"
+	client, err := loki.New(config)
+	if err != nil {
+		slog.Error("Failed to create Loki client", "error", err)
+		return nil, err
+	}
+	defer client.Stop()
+
+	logger := slog.New(
+		slogmulti.Fanout(
+			slog.NewTextHandler(os.Stdout, nil),
+			slogloki.Option{Level: slog.LevelDebug, Client: client}.NewLokiHandler(),
+		),
+	)
+	logger = logger.With(slog.String("app", "sshchat"))
+	logger.Info("Logging to Loki", "host", lokiHost)
+
+	return logger, nil
+}
+
 func main() {
+	logger, err := getLogger(config.LokiHost)
+	if err != nil {
+		logger.Error("Failed to create logger", "error", err)
+		return
+	}
+
 	geoip, err := utils.GetDB(config.RootPath + "/" + config.Geoip)
 	if err != nil {
-		log.Fatalf("Geoip db is error: %v", err)
+		logger.Error("Geoip db is error", "error", err)
+		return
 	}
 
 	pgDb, err := db.GetDB(config.PgDsn)
@@ -84,10 +126,11 @@ func main() {
 
 	keys, err := utils.CheckHostKey(config.RootPath)
 	if err != nil {
-		log.Print("Failed to check SSH keys: generate one.\n", err)
+		logger.Error("Failed to check SSH keys: generate one", "error", err)
 		err = utils.GenerateHostKey(config.RootPath)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("Fatal error", "error", err)
+			return
 		}
 
 		keys, err = utils.CheckHostKey(config.RootPath)
@@ -99,7 +142,7 @@ func main() {
 	s := &ssh.Server{
 		Addr: ":" + port,
 		Handler: func(s ssh.Session) {
-			sessionHandler(s, geoip, pgDb)
+			sessionHandler(s, geoip, pgDb, logger)
 		},
 	}
 	for _, key := range keys {
@@ -110,6 +153,8 @@ func main() {
 		_ = pgDb.Close()
 	}()
 
-	log.Print("Listening on :" + port)
-	log.Fatal(s.ListenAndServe())
+	logger.Info("Starting server", "port", port)
+	if err := s.ListenAndServe(); err != nil {
+		logger.Error("Server failed", "error", err)
+	}
 }
