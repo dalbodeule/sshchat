@@ -75,7 +75,7 @@ func sessionHandler(s ssh.Session, geoip *geoip2.Reader, pgDb *bun.DB, logger *s
 	client.EventLoop()
 }
 
-func getLogger(lokiHost string) (*slog.Logger, error) {
+func getLogger(lokiHost string, identify string) (*slog.Logger, error) {
 	if lokiHost == "" {
 		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 		logger.Info("Loki host is not set. Logging to stdout")
@@ -90,7 +90,6 @@ func getLogger(lokiHost string) (*slog.Logger, error) {
 		slog.Error("Failed to create Loki client", "error", err)
 		return nil, err
 	}
-	defer client.Stop()
 
 	logger := slog.New(
 		slogmulti.Fanout(
@@ -98,14 +97,17 @@ func getLogger(lokiHost string) (*slog.Logger, error) {
 			slogloki.Option{Level: slog.LevelDebug, Client: client}.NewLokiHandler(),
 		),
 	)
-	logger = logger.With(slog.String("app", "sshchat"))
+	logger = logger.With(
+		slog.String("app", "sshchat"),
+		slog.String("identify", identify),
+	)
 	logger.Info("Logging to Loki", "host", lokiHost)
 
 	return logger, nil
 }
 
 func main() {
-	logger, err := getLogger(config.LokiHost)
+	logger, err := getLogger(config.LokiHost, config.Identify)
 	if err != nil {
 		logger.Error("Failed to create logger", "error", err)
 		return

@@ -14,6 +14,7 @@ type Config struct {
 	PgDsn            string
 	RootPath         string
 	LokiHost         string
+	Identify         string
 }
 
 func GetConfig() *Config {
@@ -25,6 +26,7 @@ func GetConfig() *Config {
 	pgDsn := os.Getenv("DB_DSN")
 	rootPath := os.Getenv("ROOT_PATH")
 	lokiHost := os.Getenv("LOKI_HOST")
+	identify := os.Getenv("IDENTIFY")
 
 	return &Config{
 		Port:             port,
@@ -33,5 +35,6 @@ func GetConfig() *Config {
 		PgDsn:            pgDsn,
 		RootPath:         rootPath,
 		LokiHost:         lokiHost,
+		Identify:         identify,
 	}
 }
